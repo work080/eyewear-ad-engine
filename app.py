@@ -2,11 +2,15 @@ import io
 import zipfile
 from huggingface_hub import InferenceClient
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
-import pillow_heif  # 支援 iPhone HEIC 格式
 import streamlit as st
 
-# 註冊 HEIC 格式解碼器
-pillow_heif.register_heif_opener()
+# 容錯載入 HEIC 支援 (避免雲端套件安裝失敗導致系統崩潰)
+try:
+  import pyheif_pillow_opener
+
+  pyheif_pillow_opener.register_heif_opener()
+except Exception:
+  pass
 
 # 容錯載入 rembg
 try:
@@ -23,7 +27,7 @@ st.set_page_config(
 
 st.title("👓 眼鏡電商 ➔ 廣告視覺與賣點大片生成器")
 st.caption(
-    "📷 支援 HEIC/JPG/PNG ➔ 🎨 自動生成「光束、氣流、羽毛飄浮、水花」等視覺特效大片"
+    "📷 支援多圖上傳 ➔ 🎨 自動生成「光束、氣流、羽毛飄浮、水花」等 7 大賣點視覺大片"
 )
 
 st.divider()
@@ -42,10 +46,9 @@ with st.sidebar:
   glass_width = st.text_input("眼鏡總寬度", value="148mm")
   lens_height = st.text_input("鏡片高度", value="60mm")
   temple_len = st.text_input("鏡腳長度", value="125mm")
-  glass_weight = st.text_input("眼鏡重量", value="28g")
 
-# --- 1. 多圖上傳區（已修復 HEIC 上傳失敗）---
-st.subheader("1. 📸 批量上傳商品實拍照（支援 iPhone HEIC / JPG / PNG）")
+# --- 1. 多圖上傳區 ---
+st.subheader("1. 📸 批量上傳商品實拍照（支援 JPG / PNG / HEIC）")
 uploaded_files = st.file_uploader(
     "請選擇眼鏡實拍照：",
     type=["jpg", "jpeg", "png", "heic", "HEIC"],
@@ -57,8 +60,11 @@ if uploaded_files:
   cols = st.columns(min(len(uploaded_files), 5))
   for idx, file in enumerate(uploaded_files):
     with cols[idx % 5]:
-      img = Image.open(file)
-      st.image(img, caption=f"商品 {idx+1}", use_container_width=True)
+      try:
+        img = Image.open(file)
+        st.image(img, caption=f"商品 {idx+1}", use_container_width=True)
+      except Exception:
+        st.warning(f"商品 {idx+1} 格式需轉換")
 
 st.divider()
 
@@ -154,7 +160,11 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
 
       for file_idx, file in enumerate(uploaded_files):
         st.markdown(f"### 👓 處理眼鏡素材：`{file.name}`")
-        orig_img = Image.open(file)
+        try:
+          orig_img = Image.open(file)
+        except Exception:
+          st.error(f"❌ 檔案 {file.name} 格式解析失敗，請先轉換為 JPG/PNG 後上傳。")
+          continue
 
         # 自動去背
         if REMBG_AVAILABLE:
