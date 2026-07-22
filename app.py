@@ -5,11 +5,13 @@ import streamlit as st
 
 # 頁面基本設定
 st.set_page_config(
-    page_title="眼鏡廣告圖片生成器", page_icon="👓", layout="centered"
+    page_title="眼鏡品牌廣告生成引擎", page_icon="👓", layout="centered"
 )
 
 st.title("👓 眼鏡品牌廣告視覺生成引擎")
-st.caption("📷 上傳實拍照 ➔ 🎯 選擇視覺亮點 ➔ 🚀 自動生成廣告圖 Prompt 與 AI 圖片")
+st.caption(
+    "📷 上傳實拍照 ➔ 🎯 設定細節防亂印 Logo ➔ 🚀 自動生成高質感廣告 Prompt 與 AI 圖片"
+)
 
 st.divider()
 
@@ -17,24 +19,23 @@ st.divider()
 with st.sidebar:
   st.header("🔑 免費 API Key 設定")
   hf_token = st.text_input(
-      "Hugging Face Token (免費)",
+      "Hugging Face Token (免費選填)",
       type="password",
       help="填入 Token 即可在網頁直接使用 FLUX.1 生圖！",
   )
   st.markdown(
       """
         **💡 無 Token 也能使用！**  
-        複製系統產出的 Prompt，直接貼去 ChatGPT 或 Midjourney 生圖。
+        複製系統產出的 Prompt，直接貼到 ChatGPT、Midjourney 或 Bing 即可生圖。
         """
   )
 
 # --- 1. 商品實拍照上傳區 ---
 st.subheader("1. 📸 上傳商品實拍照")
 uploaded_file = st.file_uploader(
-    "請選擇眼鏡實拍照", type=["jpg", "jpeg", "png"]
+    "請選擇眼鏡實拍照（系統作為風格與構圖參考）", type=["jpg", "jpeg", "png"]
 )
 
-img = None
 if uploaded_file is not None:
   img = Image.open(uploaded_file)
   st.image(img, caption="已載入實拍照", width=320)
@@ -78,6 +79,7 @@ with col_c2:
   bg_scene = st.selectbox(
       "拍攝背景與氛圍",
       options=[
+          "粗獷岩石/地質質感 (運動風)",
           "攝影棚高級冷灰",
           "溫暖陽光沙灘",
           "都市時尚街頭",
@@ -86,12 +88,24 @@ with col_c2:
       ],
   )
 
-# --- 4. 產品外觀描述（精準色系控制） ---
-st.subheader("4. 🎨 產品外觀與細節描述（防止 AI 換款式）")
-color_desc = st.text_input(
-    "請詳細描述眼鏡外型與顏色（預設已帶入您這款螢光黃運動鏡）",
-    value="Neon yellow sports frame, red-orange gradient visor lens, wrap-around athletic sunglasses",
-)
+# --- 4. 產品真實細節控制 (防止 AI 亂印假 Logo 與塗裝錯誤) ---
+st.subheader("4. 🎨 產品細節與防亂印 Logo 設定")
+
+col_d1, col_d2 = st.columns(2)
+with col_d1:
+  frame_detail = st.text_input(
+      "鏡框與鏡腳細節描述",
+      value=(
+          "Neon yellow athletic frame, black and neon-yellow dual-color"
+          " temples"
+      ),
+  )
+with col_d2:
+  lens_detail = st.text_input(
+      "鏡片細節描述", value="Red-orange iridescent reflective visor lens"
+  )
+
+clean_logo_toggle = st.checkbox("🚫 強制移除假 Logo / 文字標籤", value=True)
 
 st.divider()
 
@@ -104,16 +118,21 @@ if uploaded_file or st.button("🚀 生成廣告圖片 Prompt", type="primary"):
       else "balanced composition"
   )
 
+  # 建立基礎 Prompt
   prompt_en = (
-      f"High-end commercial product advertisement photography of {color_desc}."
-      " CRITICAL REQUIREMENT: MUST strictly match the exact eyewear frame"
-      " shape, neon yellow frame color, red-orange gradient lens, and"
-      " wrap-around athletic structure from reference, zero distortion. Core"
-      f" visual focus: {selected_spotlight}"
+      f"High-end commercial product advertisement photography of wraparound"
+      f" sports sunglasses. Frame details: {frame_detail}. Lens details:"
+      f" {lens_detail}. Core visual focus: {selected_spotlight}"
       f" ({spotlight_dict[selected_spotlight]}). Atmosphere: {comp_str},"
       f" {bg_scene} background. Master studio lighting, 8k resolution,"
-      " photorealistic, clean commercial look."
+      " photorealistic, sharp focus on product."
   )
+
+  # 若勾選避開 Logo，加入負面防護關鍵字
+  if clean_logo_toggle:
+    prompt_en += (
+        ", NO text, NO brand logo, NO writing on frame, clean blank surface"
+    )
 
   st.success("🎉 Prompt 已自動組合完成！")
 
@@ -121,11 +140,11 @@ if uploaded_file or st.button("🚀 生成廣告圖片 Prompt", type="primary"):
   st.code(prompt_en, language="text")
 
   st.info(
-      "💡 **最佳保真作法**：因為免費 API 文字生圖容易跑偏，建議複製上面這段"
-      " Prompt，直接貼到 **ChatGPT (DALL-E 3)** 或 **Midjourney**，並**附上原圖**生成！"
+      "💡 **專業行銷小技巧**：此 Prompt 已加入 `NO text, NO brand logo`"
+      " 負面排除指令，能大幅避免 AI 印出隨機英文標籤。"
   )
 
-  # 生圖按鈕
+  # 線上生圖區塊
   st.subheader("🖼️ FLUX.1 免費線上生圖")
   if st.button("✨ 立即繪製廣告圖"):
     if not hf_token:
@@ -145,7 +164,7 @@ if uploaded_file or st.button("🚀 生成廣告圖片 Prompt", type="primary"):
               use_container_width=True,
           )
 
-          # 下載圖檔
+          # 下載圖檔轉換
           buf = io.BytesIO()
           generated_img.save(buf, format="PNG")
           byte_im = buf.getvalue()
