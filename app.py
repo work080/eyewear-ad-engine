@@ -5,12 +5,14 @@ import streamlit as st
 
 # 頁面基本設定
 st.set_page_config(
-    page_title="眼鏡品牌廣告生成引擎", page_icon="👓", layout="centered"
+    page_title="眼鏡電商 ➔ AI 商業攝影背景生成器",
+    page_icon="📸",
+    layout="centered",
 )
 
-st.title("👓 眼鏡品牌廣告視覺生成引擎")
+st.title("📸 眼鏡廣告 ➔ 高階商業攝影背景生成器")
 st.caption(
-    "📷 上傳實拍照 ➔ 🎯 設定細節防亂印 Logo ➔ 🚀 自動生成高質感廣告 Prompt 與 AI 圖片"
+    "💡 拒絕商品變形！用 AI 生成頂級商品展台背景 ➔ 疊加實拍照 ➔ 100% 保真出大片"
 )
 
 st.divider()
@@ -21,159 +23,107 @@ with st.sidebar:
   hf_token = st.text_input(
       "Hugging Face Token (免費選填)",
       type="password",
-      help="填入 Token 即可在網頁直接使用 FLUX.1 生圖！",
-  )
-  st.markdown(
-      """
-        **💡 無 Token 也能使用！**  
-        複製系統產出的 Prompt，直接貼到 ChatGPT、Midjourney 或 Bing 即可生圖。
-        """
+      help="填入 Token 即可在網頁直接生成背景圖！",
   )
 
-# --- 1. 商品實拍照上傳區 ---
-st.subheader("1. 📸 上傳商品實拍照")
-uploaded_file = st.file_uploader(
-    "請選擇眼鏡實拍照（系統作為風格與構圖參考）", type=["jpg", "jpeg", "png"]
-)
+# --- 1. 選擇商品風格與展台氛圍 ---
+st.subheader("1. 🎨 選擇廣告背景風格與氛圍")
 
-if uploaded_file is not None:
-  img = Image.open(uploaded_file)
-  st.image(img, caption="已載入實拍照", width=320)
+col1, col2 = st.columns(2)
 
-# --- 2. 選擇本張圖片的單一視覺亮點 ---
-st.subheader("2. 🎯 本張圖片的核心視覺亮點")
+with col1:
+  scene_style = st.selectbox(
+      "展台與材質主題",
+      options=[
+          "粗獷黑火山岩石 (運動風/戶外)",
+          "極速光束與科技感展示台 (競技感)",
+          "高級攝影棚水面波紋反射 (抗UV/偏光)",
+          "北歐極簡水泥與日光光影 (生活質感)",
+          "高科技微光懸浮舞台 (極輕量)",
+      ],
+  )
 
-spotlight_dict = {
-    "抗 UV": "陽光/光線折射/UV保護罩光影特效，突出抗紫外線功能",
-    "防霧": "細微氣流/透氣流線/霧氣蒸散質感，展現鏡片清晰度",
-    "輕量": "電子秤/羽毛懸浮/微浮空漂浮感，展現極致輕盈",
-    "柔軟/記憶金屬": "鏡腳彎折示意/柔和韌性曲線，展現耐壓材質",
-    "偏光": "前後對比/眩光控制/水面強光消除視覺特效",
-    "耐用/材質": "金屬與鏡片切面特寫/高品質工藝細節放大",
-    "生活使用情境": "真實人物佩戴/質感街頭/時尚氛圍拍攝",
+with col2:
+  lighting_style = st.selectbox(
+      "商業攝影光影手法",
+      options=[
+          "戲劇化輪廓側光 (High Contrast Rim Lighting)",
+          "柔和自然晨光與植物陰影 (Soft Natural Sunlight)",
+          "霓虹賽博朋克光影 (Cyberpunk Neon Glow)",
+          "頂級冷灰工作室均勻光 (Clean Studio Lighting)",
+      ],
+  )
+
+# 風景描述對照字典
+scene_prompts = {
+    "粗獷黑火山岩石 (運動風/戶外)": (
+        "rough dark volcanic rock podium, dark textured slate stone base"
+    ),
+    "極速光束與科技感展示台 (競技感)": (
+        "futuristic metallic display stage with glowing speed light trails"
+    ),
+    "高級攝影棚水面波紋反射 (抗UV/偏光)": (
+        "shallow water surface with gentle ripples, subtle reflection"
+    ),
+    "北歐極簡水泥與日光光影 (生活質感)": (
+        "minimalist concrete block display podium, soft window sunlight shadows"
+    ),
+    "高科技微光懸浮舞台 (極輕量)": (
+        "sleek black frosted glass display pedestal, dark ambient lighting"
+    ),
 }
-
-selected_spotlight = st.radio(
-    "請選擇主要訴求：", options=list(spotlight_dict.keys()), index=0
-)
-
-# --- 3. 構圖與背景質感設定 ---
-st.subheader("3. 📐 構圖與空間質感設定")
-col_c1, col_c2 = st.columns(2)
-
-with col_c1:
-  composition_style = st.multiselect(
-      "選擇構圖手法（可多選）",
-      options=[
-          "留白極簡",
-          "斜角構圖",
-          "前後景深度",
-          "景深虛化",
-          "光影對比",
-          "空間層次感",
-      ],
-      default=["留白極簡", "景深虛化"],
-  )
-
-with col_c2:
-  bg_scene = st.selectbox(
-      "拍攝背景與氛圍",
-      options=[
-          "粗獷岩石/地質質感 (運動風)",
-          "攝影棚高級冷灰",
-          "溫暖陽光沙灘",
-          "都市時尚街頭",
-          "北歐極簡木質",
-          "高科技質感展台",
-      ],
-  )
-
-# --- 4. 產品真實細節控制 (防止 AI 亂印假 Logo 與塗裝錯誤) ---
-st.subheader("4. 🎨 產品細節與防亂印 Logo 設定")
-
-col_d1, col_d2 = st.columns(2)
-with col_d1:
-  frame_detail = st.text_input(
-      "鏡框與鏡腳細節描述",
-      value=(
-          "Neon yellow athletic frame, black and neon-yellow dual-color"
-          " temples"
-      ),
-  )
-with col_d2:
-  lens_detail = st.text_input(
-      "鏡片細節描述", value="Red-orange iridescent reflective visor lens"
-  )
-
-clean_logo_toggle = st.checkbox("🚫 強制移除假 Logo / 文字標籤", value=True)
 
 st.divider()
 
-# --- 5. 生成 Prompt 與生圖 ---
-if uploaded_file or st.button("🚀 生成廣告圖片 Prompt", type="primary"):
+# --- 2. 生成 Prompt 與背景圖 ---
+st.subheader("2. 🚀 生成純背景商業 Prompt")
 
-  comp_str = (
-      ", ".join(composition_style)
-      if composition_style
-      else "balanced composition"
-  )
+prompt_en = (
+    "Commercial product display backdrop photography. Empty podium in center"
+    f" for product placement. Style: {scene_prompts[scene_style]}. Lighting:"
+    f" {lighting_style}. Shallow depth of field, blurred background, crisp"
+    " focus on empty center pedestal, cinematic mood, 8k resolution, award"
+    " winning advertising photography, NO sunglasses, NO people, clean empty"
+    " stage."
+)
 
-  # 建立基礎 Prompt
-  prompt_en = (
-      f"High-end commercial product advertisement photography of wraparound"
-      f" sports sunglasses. Frame details: {frame_detail}. Lens details:"
-      f" {lens_detail}. Core visual focus: {selected_spotlight}"
-      f" ({spotlight_dict[selected_spotlight]}). Atmosphere: {comp_str},"
-      f" {bg_scene} background. Master studio lighting, 8k resolution,"
-      " photorealistic, sharp focus on product."
-  )
+st.code(prompt_en, language="text")
 
-  # 若勾選避開 Logo，加入負面防護關鍵字
-  if clean_logo_toggle:
-    prompt_en += (
-        ", NO text, NO brand logo, NO writing on frame, clean blank surface"
-    )
+st.info(
+    "💡 **最佳電商出圖流程**：\n1. 用下方按鈕生成優質背景圖\n2. 點擊【下載背景圖】\n3. 在"
+    " Canva / Photoshop 貼上您去背後的眼鏡實拍照，即刻完成 100% 真實廣告！"
+)
 
-  st.success("🎉 Prompt 已自動組合完成！")
+# 生圖按鈕
+st.subheader("🖼️ 一鍵生成頂級商業背景")
+if st.button("✨ 立即繪製廣告背景圖", type="primary"):
+  if not hf_token:
+    st.warning("⚠️ 請在左側欄填入 Hugging Face Free Token！")
+  else:
+    with st.spinner("🤖 FLUX.1 正在為您繪製高階商業展台背景..."):
+      try:
+        client = InferenceClient(
+            model="black-forest-labs/FLUX.1-schnell", token=hf_token.strip()
+        )
+        generated_img = client.text_to_image(prompt_en)
 
-  st.subheader("🎨 AI 繪圖專用 Prompt (英文)")
-  st.code(prompt_en, language="text")
+        st.success("🎉 背景生成成功！請將實拍照去背後合成至中央展台。")
+        st.image(
+            generated_img,
+            caption="商業展示背景（已預留中央商品位置）",
+            use_container_width=True,
+        )
 
-  st.info(
-      "💡 **專業行銷小技巧**：此 Prompt 已加入 `NO text, NO brand logo`"
-      " 負面排除指令，能大幅避免 AI 印出隨機英文標籤。"
-  )
+        # 下載圖檔
+        buf = io.BytesIO()
+        generated_img.save(buf, format="PNG")
+        byte_im = buf.getvalue()
 
-  # 線上生圖區塊
-  st.subheader("🖼️ FLUX.1 免費線上生圖")
-  if st.button("✨ 立即繪製廣告圖"):
-    if not hf_token:
-      st.warning("⚠️ 請在左側欄填入 Hugging Face Free Token！")
-    else:
-      with st.spinner("🤖 FLUX.1 正在生成廣告圖中，請稍候 10~20 秒..."):
-        try:
-          client = InferenceClient(
-              model="black-forest-labs/FLUX.1-schnell", token=hf_token.strip()
-          )
-          generated_img = client.text_to_image(prompt_en)
-
-          st.success("🎉 圖片生成成功！")
-          st.image(
-              generated_img,
-              caption="FLUX.1 生成成果",
-              use_container_width=True,
-          )
-
-          # 下載圖檔轉換
-          buf = io.BytesIO()
-          generated_img.save(buf, format="PNG")
-          byte_im = buf.getvalue()
-
-          st.download_button(
-              label="📥 下載廣告圖",
-              data=byte_im,
-              file_name="eyewear_ad.png",
-              mime="image/png",
-          )
-        except Exception as e:
-          st.error(f"❌ 生成失敗，請檢查 Token 是否正確：{str(e)}")
+        st.download_button(
+            label="📥 下載高畫質背景圖",
+            data=byte_im,
+            file_name="commercial_background.png",
+            mime="image/png",
+        )
+      except Exception as e:
+        st.error(f"❌ 生成失敗，請檢查 Token 是否正確：{str(e)}")
