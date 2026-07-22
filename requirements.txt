@@ -1,3 +1,5 @@
-requests
+streamlit
 pillow
 huggingface_hub
+rembg
+onnxruntime
