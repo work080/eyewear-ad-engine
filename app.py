@@ -1,4 +1,7 @@
 import streamlit as st
+import requests
+import io
+from PIL import Image
 
 # 頁面基本設定
 st.set_page_config(
@@ -8,9 +11,26 @@ st.set_page_config(
 )
 
 st.title("👓 品牌廣告視覺生成引擎 (眼鏡專用版)")
-st.caption("結合眼鏡型號、尺寸與特殊功能，自動生成「畫面優先」的廣告級 AI 提示詞")
+st.caption("結合眼鏡規格與 AI 繪圖（FLUX.1），自動生成廣告圖片與英文 Prompt")
 
 st.divider()
+
+# --- 側邊欄：Hugging Face 免費 API 金鑰設定 ---
+with st.sidebar:
+    st.header("🔑 免費 API Key 設定")
+    hf_token = st.text_input(
+        "Hugging Face Token (免費)", 
+        type="password",
+        help="填入 Token 即可開啟免費直接生圖功能！"
+    )
+    st.markdown(
+        """
+        **如何取得免費 Token？（約 30 秒）**
+        1. 註冊/登入 [Hugging Face](https://huggingface.co/)
+        2. 進入 [Access Tokens 頁面](https://huggingface.co/settings/tokens)
+        3. 點擊 **Create new token** $\\rightarrow$ 選擇 **Read** 權限，複製 Token 貼到此處即可！
+        """
+    )
 
 # --- 1. 基本資訊與眼鏡類型 ---
 st.subheader("1. 基本資訊與眼鏡類型")
@@ -20,18 +40,16 @@ with col1:
 with col2:
     model_num = st.text_input("🏷️ 型號", placeholder="例：EG-2026X")
 
-# 1. 改為複選，新增：變色片、雪鏡、運動型護目鏡、折疊眼鏡
 func_types = st.multiselect(
     "👓 眼鏡主要功能類型（可複選）",
     options=["偏光", "無偏光", "老花眼鏡", "護目鏡", "變色片", "雪鏡", "運動型護目鏡", "折疊眼鏡"],
     default=["偏光"]
 )
 
-# --- 2. 尺寸與重量規格 ---
+# --- 2. 尺寸與重量規格 (cm) ---
 st.subheader("2. 尺寸與重量規格（轉化為精密特寫細節）")
 col_s1, col_s2, col_s3 = st.columns(3)
 
-# 2. 尺寸單位全部更換為 cm
 with col_s1:
     total_width = st.text_input("總鏡寬 (cm)", value="14.2")
 with col_s2:
@@ -50,7 +68,6 @@ with col_s6:
 # --- 3. 視覺特效與功能特點 ---
 st.subheader("3. 視覺特效與功能特點")
 
-# 3. 新增：濾藍光、防紫外線、防刮、感光變色
 visual_highlights = st.multiselect(
     "✨ 選擇視覺亮點（自動轉換為特效與氛圍）",
     options=[
@@ -66,7 +83,7 @@ extra_features = st.text_area(
     height=80
 )
 
-# --- 4. 使用背景與情境（修復與優化） ---
+# --- 4. 使用背景與情境 ---
 st.subheader("4. 🏞️ 使用背景與情境（選填）")
 bg_presets = st.multiselect(
     "快速選擇拍攝場景氛圍",
@@ -75,49 +92,68 @@ bg_presets = st.multiselect(
 )
 custom_bg = st.text_input("或自訂特定場景描述", placeholder="例如：北歐雪山日出時的金色光影，極致科技質感背景")
 
-# --- 5. 提示詞生成邏輯 ---
+# --- 5. 提示詞與生圖邏輯 ---
 st.divider()
 
-if st.button("🚀 生成 AI 廣告圖片提示詞 (Prompt)", type="primary"):
-    # 組合類型與背景
-    type_str = ", ".join(func_types) if func_types else "通用眼鏡"
-    highlights_str = ", ".join(visual_highlights) if visual_highlights else ""
-    
-    bg_list = list(bg_presets)
-    if custom_bg.strip():
-        bg_list.append(custom_bg.strip())
-    bg_combined = ", ".join(bg_list) if bg_list else "極簡商業攝影棚"
+# 組合英文提示詞
+type_str = ", ".join(func_types) if func_types else "eyewear"
+highlights_str = ", ".join(visual_highlights) if visual_highlights else ""
 
-    # 生成英文提示詞 (適用於 Midjourney / Flux / DALL-E / Gemini)
-    prompt_en = f"Commercial product photography for eyewear ({product_name if product_name else 'sunglasses'}, model {model_num if model_num else 'Pro'}). "
-    prompt_en += f"Eyewear types: {type_str}. "
-    
-    if highlights_str:
-        prompt_en += f"Key visual characteristics & special effects: {highlights_str}. "
-    
-    # 尺寸特寫轉化 (cm)
-    prompt_en += f"Precise specifications: total width {total_width}cm, lens size {lens_width}x{lens_height}cm, bridge {bridge_width}cm, temple {temple_len}cm, ultralight {weight}g. "
-    
-    prompt_en += f"Setting & background atmosphere: {bg_combined}. "
-    
-    if extra_features.strip():
-        prompt_en += f"Additional features: {extra_features.strip()}. "
+bg_list = list(bg_presets)
+if custom_bg.strip():
+    bg_list.append(custom_bg.strip())
+bg_combined = ", ".join(bg_list) if bg_list else "professional commercial studio photography"
 
-    prompt_en += "Macro close-up shot, crystal clear lenses, high-end studio lighting, sharp focus, 8k resolution, professional advertising quality, hyper-realistic."
+prompt_en = f"Commercial product photo of eyewear ({product_name if product_name else 'sunglasses'}, model {model_num if model_num else 'Pro'}). "
+prompt_en += f"Type: {type_str}. "
+if highlights_str:
+    prompt_en += f"Visual features: {highlights_str}. "
+prompt_en += f"Dimensions: total width {total_width}cm, lens {lens_width}x{lens_height}cm, bridge {bridge_width}cm, temple {temple_len}cm, weight {weight}g. "
+prompt_en += f"Setting background: {bg_combined}. "
+if extra_features.strip():
+    prompt_en += f"Extra details: {extra_features.strip()}. "
+prompt_en += "Macro close-up shot, crystal clear lenses, high-end studio lighting, sharp focus, 8k resolution, hyper-realistic, advertising style."
 
-    # 中文輔助說明
-    prompt_zh = f"【商品名稱】{product_name} ({model_num})\n"
-    prompt_zh += f"【功能類型】{type_str}\n"
-    prompt_zh += f"【尺寸規格】總寬 {total_width}cm / 鏡寬 {lens_width}cm / 鏡高 {lens_height}cm / 鼻寬 {bridge_width}cm / 鏡腳 {temple_len}cm / 重 {weight}g\n"
-    prompt_zh += f"【視覺亮點】{highlights_str}\n"
-    prompt_zh += f"【背景場景】{bg_combined}\n"
-    if extra_features.strip():
-        prompt_zh += f"【補充功能】{extra_features.strip()}\n"
+# 顯示產出的 Prompt
+st.subheader("🎨 AI 繪圖 Prompt (英文)")
+st.code(prompt_en, language="text")
 
-    st.success("🎉 生成成功！請複製以下提示詞使用：")
-    
-    st.subheader("🎨 AI 繪圖 Prompt (英文 - Midjourney / Flux)")
-    st.code(prompt_en, language="text")
-    
-    st.subheader("📋 廣告文案亮點摘要 (中文)")
-    st.text_area("可直接作為社群貼文或文案參考：", value=prompt_zh, height=180)
+# 生圖按鈕
+st.subheader("🖼️ AI 一鍵生成圖片 (FLUX.1)")
+
+if st.button("🚀 生成 AI 廣告圖片", type="primary"):
+    if not hf_token:
+        st.warning("⚠️ 請先在左側欄（Sidebar）填入您的 Hugging Face Free Token 才能啟用免費出圖功能喔！")
+    else:
+        with st.spinner("🤖 FLUX.1 模型正在為您繪製高畫質眼鏡廣告圖，約需 10 ~ 20 秒..."):
+            API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+            headers = {"Authorization": f"Bearer {hf_token.strip()}"}
+            
+            try:
+                response = requests.post(
+                    API_URL, 
+                    headers=headers, 
+                    json={"inputs": prompt_en},
+                    timeout=60
+                )
+                
+                if response.status_code == 200:
+                    image_bytes = response.content
+                    image = Image.open(io.BytesIO(image_bytes))
+                    
+                    st.success("🎉 圖片生成成功！")
+                    st.image(image, caption=f"FLUX.1 生成成果：{product_name}", use_container_width=True)
+                    
+                    # 提供下載按鈕
+                    st.download_button(
+                        label="📥 下載高畫質廣告圖片",
+                        data=image_bytes,
+                        file_name=f"eyewear_{model_num if model_num else 'ad'}.png",
+                        mime="image/png"
+                    )
+                elif response.status_code == 503:
+                    st.error("⏳ 模型正在初始化中（冷啟動），請稍等 15 秒後再試一次！")
+                else:
+                    st.error(f"❌ 生成失敗 (錯誤碼 {response.status_code})：{response.text}")
+            except Exception as e:
+                st.error(f"❌ 連線發生錯誤：{str(e)}")
