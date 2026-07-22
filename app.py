@@ -11,7 +11,7 @@ st.set_page_config(
 
 st.title("👓 眼鏡電商 ➔ 廣告視覺與賣點大片生成器")
 st.caption(
-    "📷 支援 JPG / PNG ➔ 🎨 自動生成「光束、氣流、羽毛飄浮、水花」等 7 大賣點視覺大片"
+    "📷 支援批量上傳 ➔ 🎨 自動生成「光束、氣流、羽毛飄浮、水花」等 7 大賣點視覺大片"
 )
 
 st.divider()
@@ -26,10 +26,12 @@ with st.sidebar:
   )
   brand_logo_text = st.text_input("品牌 Logo 文字", value="SCVCN")
 
-  st.subheader("📐 商品尺寸設定")
-  glass_width = st.text_input("眼鏡總寬度", value="148mm")
-  lens_height = st.text_input("鏡片高度", value="60mm")
-  temple_len = st.text_input("鏡腳長度", value="125mm")
+  st.subheader("📐 商品尺寸與規格設定 (cm / g)")
+  glass_width = st.text_input("鏡框總寬度", value="14.8 cm")
+  lens_height = st.text_input("鏡片高度", value="6.0 cm")
+  bridge_width = st.text_input("鼻寬 (Bridge Width)", value="2.0 cm")
+  temple_len = st.text_input("鏡腳長度", value="12.5 cm")
+  glass_weight = st.text_input("商品重量", value="28g")
 
 # --- 1. 多圖上傳區 ---
 st.subheader("1. 📸 批量上傳商品實拍照（建議使用 JPG / PNG）")
@@ -80,13 +82,16 @@ def add_watermark_logo(img, text="SCVCN"):
   return img_copy
 
 
-def create_dimension_overlay(product_img, width_str, height_str, temple_str):
-  """尺寸標示視覺圖"""
+def create_specs_overlay(
+    product_img, width_str, height_str, bridge_str, temple_str, weight_str
+):
+  """尺寸與規格標示視覺圖 (包含總寬、高、鼻寬、鏡腳長、重量)"""
   img = product_img.copy().convert("RGBA")
   w, h = img.size
   draw = ImageDraw.Draw(img)
 
   color = (255, 70, 70, 255)
+  # 繪製主尺寸線條
   draw.line(
       [(int(w * 0.1), int(h * 0.85)), (int(w * 0.9), int(h * 0.85))],
       fill=color,
@@ -104,22 +109,43 @@ def create_dimension_overlay(product_img, width_str, height_str, temple_str):
   )
 
   try:
-    font = ImageFont.truetype("arial.ttf", int(h * 0.045))
+    font_large = ImageFont.truetype("arial.ttf", int(h * 0.04))
+    font_small = ImageFont.truetype("arial.ttf", int(h * 0.035))
   except IOError:
-    font = ImageFont.load_default()
+    font_large = font_small = ImageFont.load_default()
 
+  # 標示文字
   draw.text(
-      (int(w * 0.35), int(h * 0.88)),
-      f"Width: {width_str}",
+      (int(w * 0.28), int(h * 0.88)),
+      f"Total Width: {width_str}",
       fill=(20, 20, 20, 255),
-      font=font,
+      font=font_large,
   )
   draw.text(
-      (int(w * 0.05), int(h * 0.45)),
-      f"Height: {height_str}",
+      (int(w * 0.05), int(h * 0.40)),
+      f"Lens Height: {height_str}",
       fill=(20, 20, 20, 255),
-      font=font,
+      font=font_small,
   )
+  draw.text(
+      (int(w * 0.05), int(h * 0.46)),
+      f"Bridge Width: {bridge_str}",
+      fill=(20, 20, 20, 255),
+      font=font_small,
+  )
+  draw.text(
+      (int(w * 0.05), int(h * 0.52)),
+      f"Temple Len: {temple_str}",
+      fill=(20, 20, 20, 255),
+      font=font_small,
+  )
+  draw.text(
+      (int(w * 0.05), int(h * 0.58)),
+      f"Weight: {weight_str}",
+      fill=(220, 40, 40, 255),
+      font=font_large,
+  )
+
   return img
 
 
@@ -216,11 +242,16 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
           img_temple = client.text_to_image(p5)
           st.image(img_temple, use_container_width=True)
 
-        # 6. 尺寸標示圖
+        # 6. 尺寸與重量規格圖
         with c6:
-          st.caption("6️⃣ 尺寸規格圖")
-          img_dim = create_dimension_overlay(
-              orig_img, glass_width, lens_height, temple_len
+          st.caption("6️⃣ 尺寸與重量規格標示圖")
+          img_dim = create_specs_overlay(
+              orig_img,
+              glass_width,
+              lens_height,
+              bridge_width,
+              temple_len,
+              glass_weight,
           )
           st.image(img_dim, use_container_width=True)
 
@@ -243,7 +274,7 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
             (img_fog, "03_Airflow_AntiFog.png"),
             (img_light, "04_Feather_Lightweight.png"),
             (img_temple, "05_Temple_Detail.png"),
-            (img_dim, "06_Dimension_Specs.png"),
+            (img_dim, "06_Dimensions_Specs.png"),
             (img_model, "07_Lifestyle_Action.png"),
         ]:
           buf = io.BytesIO()
