@@ -1,6 +1,7 @@
 import io
 import zipfile
 from huggingface_hub import InferenceClient
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
 
@@ -10,9 +11,7 @@ st.set_page_config(
 )
 
 st.title("👓 眼鏡電商 ➔ 廣告視覺與賣點大片生成器")
-st.caption(
-    "📷 支援批量上傳 ➔ 🎨 自動生成「光束、氣流、羽毛飄浮、水花」等 7 大賣點視覺大片"
-)
+st.caption("📷 支援批量去背 ➔ 🎨 自動將商品去背合成至 7 大賣點情境大片")
 
 st.divider()
 
@@ -55,7 +54,37 @@ if uploaded_files:
 st.divider()
 
 
-# --- 2. 輔助函式 ---
+# --- 2. 輔助函式：去背與合成 ---
+def remove_white_background(img):
+  """將商品白底去背轉為透明 RGBA"""
+  img = img.convert("RGBA")
+  arr = np.array(img)
+  r, g, b, a = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2], arr[:, :, 3]
+  # 偵測接近白色的背景並轉為透明
+  white_mask = (r > 215) & (g > 215) & (b > 215)
+  arr[white_mask, 3] = 0
+  return Image.fromarray(arr, "RGBA")
+
+
+def composite_glass_on_bg(bg_img, cutout_img, scale=0.55, y_offset=0):
+  """將去背眼鏡完美合成到背景圖中央"""
+  bg = bg_img.copy().convert("RGBA")
+  bg_w, bg_h = bg.size
+
+  target_w = int(bg_w * scale)
+  w_percent = target_w / float(cutout_img.size[0])
+  target_h = int(float(cutout_img.size[1]) * w_percent)
+  resized_glass = cutout_img.resize(
+      (target_w, target_h), Image.Resampling.LANCZOS
+  )
+
+  paste_x = (bg_w - target_w) // 2
+  paste_y = (bg_h - target_h) // 2 + y_offset
+
+  bg.paste(resized_glass, (paste_x, paste_y), mask=resized_glass)
+  return bg
+
+
 def add_watermark_logo(img, text="SCVCN"):
   """在主圖加入質感品牌 Logo 標籤"""
   img_copy = img.copy().convert("RGBA")
@@ -83,14 +112,13 @@ def add_watermark_logo(img, text="SCVCN"):
 
 
 def safe_generate_image(client, prompt, fallback_color=(25, 25, 30)):
-  """安全生成圖片：若 API 失敗或未授權，自動轉為內建專業攝影棚底圖"""
+  """安全生成背景圖：若 API 失敗或未授權，自動轉為內建專業攝影棚底圖"""
   if client is not None:
     try:
       return client.text_to_image(prompt).convert("RGBA")
     except Exception:
       pass
 
-  # 容錯備用底圖 (1024x1024)
   img = Image.new("RGBA", (1024, 1024), fallback_color + (255,))
   draw = ImageDraw.Draw(img)
   draw.rectangle(
@@ -100,14 +128,19 @@ def safe_generate_image(client, prompt, fallback_color=(25, 25, 30)):
     font = ImageFont.truetype("arial.ttf", 36)
   except IOError:
     font = ImageFont.load_default()
-  draw.text((120, 120), "STUDIO VISUAL BACKDROP", fill=(150, 150, 160, 200), font=font)
+  draw.text(
+      (120, 120),
+      "STUDIO COMMERCIAL BACKDROP",
+      fill=(150, 150, 160, 200),
+      font=font,
+  )
   return img
 
 
 def create_specs_overlay(
     product_img, width_str, height_str, bridge_str, temple_str, weight_str
 ):
-  """尺寸與規格標示視覺圖 (包含總寬、高、鼻寬、鏡腳長、重量)"""
+  """尺寸與規格標示視覺圖"""
   img = product_img.copy().convert("RGBA")
   w, h = img.size
   draw = ImageDraw.Draw(img)
@@ -170,9 +203,9 @@ def create_specs_overlay(
 
 
 # --- 3. 批量生成 7 大視覺亮點廣告大片 ---
-st.subheader("2. 🚀 一鍵生成「視覺亮點」全套廣告大片")
+st.subheader("2. 🚀 一鍵去背與合成全套廣告大片")
 
-if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
+if st.button("✨ 立即去背並合成全套大片", type="primary"):
   if not uploaded_files:
     st.error("⚠️ 請先上傳至少一張眼鏡實拍照！")
   else:
@@ -199,77 +232,71 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
           st.error(f"❌ 檔案 {file.name} 格式解析失敗，請確認為 JPG 或 PNG。")
           continue
 
+        # 執行自動去背
+        cutout_img = remove_white_background(orig_img)
+
         # 網頁排版 (4 + 3 格)
         c1, c2, c3, c4 = st.columns(4)
         c5, c6, c7, c8 = st.columns(4)
 
-        # 1. 主圖：黑火山岩展台 + 斜角空間層次
+        # 1. 主圖：黑火山岩展台 + 合成眼鏡 + Logo
         with c1:
-          st.caption("1️⃣ 品牌首圖 (展台 + 斜角構圖)")
+          st.caption("1️⃣ 品牌首圖 (展台合成)")
           p1 = (
               "Commercial product stage backdrop, dark volcanic slate stone"
               " podium, dramatic rim lighting, cinematic depth of field, empty"
               " center"
           )
-          bg1 = safe_generate_image(
-              client, p1, fallback_color=(20, 20, 25)
-          ).convert("RGBA")
-
-          bg_w, bg_h = bg1.size
-          tw = int(bg_w * 0.52)
-          th = int(tw * (orig_img.height / orig_img.width))
-          resized = orig_img.resize((tw, th), Image.Resampling.LANCZOS)
-
-          bg1.paste(resized, ((bg_w - tw) // 2, int(bg_h * 0.42)), mask=resized)
-          img_main = add_watermark_logo(bg1, text=brand_logo_text)
+          bg1 = safe_generate_image(client, p1, fallback_color=(20, 20, 25))
+          composed_1 = composite_glass_on_bg(bg1, cutout_img, scale=0.55)
+          img_main = add_watermark_logo(composed_1, text=brand_logo_text)
           st.image(img_main, use_container_width=True)
 
-        # 2. 抗UV / 偏光：強光光束 + 水花折射
+        # 2. 抗UV / 偏光：強光光束 + 水花折射合成
         with c2:
-          st.caption("2️⃣ 抗 UV / 偏光亮點 (強光束 + 水花折射)")
+          st.caption("2️⃣ 抗 UV / 偏光亮點合成")
           p2 = (
               "Bright intense solar light beam spectrum passing through transparent"
               " water droplets, lens refraction light streaks, glare control"
               " visual effect, dark studio"
           )
-          img_uv = safe_generate_image(client, p2, fallback_color=(15, 30, 45))
+          bg2 = safe_generate_image(client, p2, fallback_color=(15, 30, 45))
+          img_uv = composite_glass_on_bg(bg2, cutout_img, scale=0.52)
           st.image(img_uv, use_container_width=True)
 
-        # 3. 防霧 / 流線：動態風洞氣流
+        # 3. 防霧 / 流線：動態風洞氣流合成
         with c3:
-          st.caption("3️⃣ 防霧透氣亮點 (動態空氣流線)")
+          st.caption("3️⃣ 防霧透氣亮點合成")
           p3 = (
               "Aerodynamic wind tunnel visual effect, white smooth smoke airflow"
               " lines swirling through air, high-speed motion trail, dark blue"
               " background"
           )
-          img_fog = safe_generate_image(client, p3, fallback_color=(20, 35, 50))
+          bg3 = safe_generate_image(client, p3, fallback_color=(20, 35, 50))
+          img_fog = composite_glass_on_bg(bg3, cutout_img, scale=0.52)
           st.image(img_fog, use_container_width=True)
 
-        # 4. 極輕量：羽毛懸浮 + 漂浮微重力
+        # 4. 極輕量：羽毛懸浮合成
         with c4:
-          st.caption("4️⃣ 超輕量亮點 (羽毛懸浮 + 微重力漂浮)")
+          st.caption("4️⃣ 超輕量亮點合成")
           p4 = (
               "Soft white feather floating in mid-air, levitation floating"
               " effect, zero gravity concept, clean soft lighting, ultra light"
               " feel"
           )
-          img_light = safe_generate_image(
-              client, p4, fallback_color=(40, 40, 45)
-          )
+          bg4 = safe_generate_image(client, p4, fallback_color=(40, 40, 45))
+          img_light = composite_glass_on_bg(bg4, cutout_img, scale=0.52)
           st.image(img_light, use_container_width=True)
 
-        # 5. 耐用韌性：雙色鏡腳與機械切面放大
+        # 5. 耐用韌性：高科技金屬背景合成
         with c5:
-          st.caption("5️⃣ 耐用細節亮點 (雙色鏡腳機械特寫)")
+          st.caption("5️⃣ 耐用細節亮點合成")
           p5 = (
-              "Macro close-up photography of neon yellow and black dual-color"
-              " sports sunglass temples, precision engineered texture, sharp"
-              " focus, metallic hinge details"
+              "Macro close-up photography of precision engineered carbon fiber"
+              " texture, sharp focus, metallic hinge details, dark studio"
           )
-          img_temple = safe_generate_image(
-              client, p5, fallback_color=(30, 30, 30)
-          )
+          bg5 = safe_generate_image(client, p5, fallback_color=(30, 30, 30))
+          img_temple = composite_glass_on_bg(bg5, cutout_img, scale=0.55)
           st.image(img_temple, use_container_width=True)
 
         # 6. 尺寸與重量規格圖
@@ -285,17 +312,15 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
           )
           st.image(img_dim, use_container_width=True)
 
-        # 7. 情境圖：真實人物 + 速度感景深
+        # 7. 情境圖：戶外騎行背景合成
         with c7:
-          st.caption("7️⃣ 動態使用情境 (戶外騎行 + 前後景深)")
+          st.caption("7️⃣ 動態使用情境合成")
           p7 = (
-              "Professional cyclist wearing neon yellow athletic sunglasses"
-              " riding fast on scenic highway, motion blur background, bright"
-              " sunshine, action shot"
+              "Professional cyclist riding fast on scenic highway, motion blur"
+              " background, bright sunshine, action shot"
           )
-          img_model = safe_generate_image(
-              client, p7, fallback_color=(20, 40, 30)
-          )
+          bg7 = safe_generate_image(client, p7, fallback_color=(20, 40, 30))
+          img_model = composite_glass_on_bg(bg7, cutout_img, scale=0.55)
           st.image(img_model, use_container_width=True)
 
         # 打包儲存
@@ -315,7 +340,7 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
 
         st.divider()
 
-    st.success("🎉 全套視覺亮點廣告圖已生成完成！")
+    st.success("🎉 全套去背與合成大片已生成完成！")
     st.download_button(
         label="📥 一鍵打包下載【全套廣告大片 (ZIP)】",
         data=all_zip_buffer.getvalue(),
