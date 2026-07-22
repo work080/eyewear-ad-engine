@@ -1,187 +1,300 @@
 import io
+import zipfile
 from huggingface_hub import InferenceClient
-from PIL import Image, ImageDraw, ImageFilter
-from rembg import remove  # 自動去背套件
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import streamlit as st
+
+# 容錯載入 rembg
+try:
+  from rembg import remove
+
+  REMBG_AVAILABLE = True
+except Exception:
+  REMBG_AVAILABLE = False
 
 # 頁面基本設定
 st.set_page_config(
-    page_title="眼鏡電商 ➔ AI 一鍵商業攝影合成引擎",
+    page_title="眼鏡電商 ➔ 全套 6 大商業主圖批量生成器",
     page_icon="👓",
-    layout="centered",
+    layout="wide",
 )
 
-st.title("👓 眼鏡電商 ➔ 一鍵自動合成商業大片引擎")
+st.title("👓 眼鏡電商 ➔ 批量多圖 & 全套 6 大廣告主圖生成引擎")
 st.caption(
-    "📷 上傳實拍照 ➔ 🚀 AI 自動去背 + 生成展台 + 圖層合成 ➔ 直接下載完稿大片！"
+    "📷 上傳多張商品圖 ➔ 🚀 自動產出：品牌首圖 / 鼻墊特寫 / 鏡腳特寫 / 尺寸圖 / 重量圖 /"
+    " 情境圖 ➔ 一鍵打包下載！"
 )
 
 st.divider()
 
-# --- 側邊欄：Hugging Face 免費 API 金鑰設定 ---
+# --- 側邊欄：API 與品牌設定 ---
 with st.sidebar:
-  st.header("🔑 免費 API Key 設定")
+  st.header("⚙️ 品牌與 API 設定")
   hf_token = st.text_input(
       "Hugging Face Token (免費選填)",
       type="password",
-      help="填入 Token 即可在網頁直接生成背景與合成圖！",
+      help="填入 Token 即可自動生成 AI 情境背景與特寫！",
   )
-  st.markdown(
-      """
-        ---
-        **💡 提示**：  
-        如專案部署遇到 `rembg` 錯誤，請確認您的 `requirements.txt` 檔案中有加上 `rembg` 與 `onnxruntime`。
-        """
+  brand_logo_text = st.text_input("品牌 Logo 文字", value="SCVCN")
+  st.markdown("---")
+  st.info(
+      "💡 **套圖包含**：\n1. 品牌展台首圖\n2. 鼻墊結構特寫\n3. 鏡腳細節特寫\n4. 尺寸規格標示圖\n5."
+      " 極輕重量圖表\n6. 戶外情境配戴圖"
   )
 
-# --- 1. 商品實拍照上傳區 ---
-st.subheader("1. 📸 上傳商品實拍照")
-uploaded_file = st.file_uploader(
-    "請選擇眼鏡實拍照（系統將自動進行 AI 去背）", type=["jpg", "jpeg", "png"]
+# --- 1. 多圖上傳區 ---
+st.subheader("1. 📸 批量上傳商品實拍照（可一次選擇多張）")
+uploaded_files = st.file_uploader(
+    "請選擇一張或多張眼鏡實拍照：",
+    type=["jpg", "jpeg", "png"],
+    accept_multiple_files=True,
 )
 
-img_uploaded = None
-if uploaded_file is not None:
-  img_uploaded = Image.open(uploaded_file)
-  st.image(
-      img_uploaded,
-      caption="已載入商品實拍照",
-      width=260,
-  )
-
-# --- 2. 選擇展台與拍攝風格 ---
-st.subheader("2. 🎨 選擇展台背景風格與光影")
-
-col1, col2 = st.columns(2)
-
-with col1:
-  scene_style = st.selectbox(
-      "展台與材質主題",
-      options=[
-          "粗獷黑火山岩石 (運動/戶外)",
-          "極速光束與科技感展台 (競技感)",
-          "高級水面波紋與陽光折射 (抗UV/偏光)",
-          "北歐極簡水泥與日光光影 (生活質感)",
-          "高科技微光懸浮舞台 (極輕量)",
-      ],
-  )
-
-with col2:
-  lighting_style = st.selectbox(
-      "商業攝影光影手法",
-      options=[
-          "戲劇化輪廓側光 (High Contrast Rim Lighting)",
-          "柔和自然晨光 (Soft Natural Sunlight)",
-          "霓虹賽博朋克光影 (Cyberpunk Neon Glow)",
-          "頂級冷灰工作室均勻光 (Clean Studio Lighting)",
-      ],
-  )
-
-scene_prompts = {
-    "粗獷黑火山岩石 (運動/戶外)": (
-        "rough dark volcanic rock podium, dark slate base"
-    ),
-    "極速光束與科技感展台 (競技感)": (
-        "futuristic metallic display stage with glowing red and white light"
-        " tracks, empty pedestal in middle"
-    ),
-    "高級水面波紋與陽光折射 (抗UV/偏光)": (
-        "shallow water surface with gentle ripples, sunlight refraction on"
-        " pedestal"
-    ),
-    "北歐極簡水泥與日光光影 (生活質感)": (
-        "minimalist concrete block display podium, soft window sunlight shadow"
-    ),
-    "高科技微光懸浮舞台 (極輕量)": (
-        "sleek black frosted glass pedestal, dark ambient lighting"
-    ),
-}
-
-backdrop_prompt = (
-    "Commercial product display backdrop photography. Clean empty round"
-    f" pedestal stage in center. Background style: {scene_prompts[scene_style]}."
-    f" Lighting: {lighting_style}. Shallow depth of field, blurred background,"
-    " crisp focus on center pedestal, 8k resolution, NO sunglasses, NO text,"
-    " clean empty stage."
-)
+if uploaded_files:
+  st.success(f"已成功載入 {len(uploaded_files)} 張商品照片！")
+  cols = st.columns(min(len(uploaded_files), 5))
+  for idx, file in enumerate(uploaded_files):
+    with cols[idx % 5]:
+      st.image(Image.open(file), caption=f"商品 {idx+1}", use_container_width=True)
 
 st.divider()
 
-# --- 3. 一鍵自動去背與合成 ---
-st.subheader("3. 🚀 自動去背 + 背景生成 + 陰影合成")
+# --- 2. 輔助繪圖與文字函式 ---
 
-if st.button("✨ 一鍵產出 100% 真實廣告合成大片", type="primary"):
-  if not img_uploaded:
-    st.error("⚠️ 請先上傳眼鏡實拍照！")
+
+def add_watermark_logo(img, text="SCVCN"):
+  """在圖片左上角加上品牌 Logo標籤"""
+  img_copy = img.copy().convert("RGBA")
+  draw = ImageDraw.Draw(img_copy)
+  w, h = img_copy.size
+
+  # 繪製半透明 Logo 底框
+  box_w, box_h = int(w * 0.25), int(h * 0.08)
+  margin = int(w * 0.04)
+  draw.rectangle(
+      [margin, margin, margin + box_w, margin + box_h], fill=(0, 0, 0, 180)
+  )
+
+  # 標示 Logo 文字
+  try:
+    font = ImageFont.truetype("arial.ttf", int(box_h * 0.5))
+  except IOError:
+    font = ImageFont.load_default()
+
+  draw.text(
+      (margin + int(box_w * 0.15), margin + int(box_h * 0.2)),
+      text,
+      fill=(255, 255, 255, 255),
+      font=font,
+  )
+  return img_copy
+
+
+def create_dimension_image(product_img):
+  """生成尺寸標示圖表"""
+  img = product_img.copy().convert("RGBA")
+  w, h = img.size
+  draw = ImageDraw.Draw(img)
+
+  # 繪製尺寸指示線 (鏡框寬度與鏡腳長度)
+  color = (255, 50, 50, 255)
+  # 橫向總寬標示線
+  draw.line(
+      [(int(w * 0.1), int(h * 0.85)), (int(w * 0.9), int(h * 0.85))],
+      fill=color,
+      width=4,
+  )
+  draw.line(
+      [(int(w * 0.1), int(h * 0.82)), (int(w * 0.1), int(h * 0.88))],
+      fill=color,
+      width=4,
+  )
+  draw.line(
+      [(int(w * 0.9), int(h * 0.82)), (int(w * 0.9), int(h * 0.88))],
+      fill=color,
+      width=4,
+  )
+
+  # 加上尺寸文字標籤
+  try:
+    font = ImageFont.truetype("arial.ttf", int(h * 0.045))
+  except IOError:
+    font = ImageFont.load_default()
+
+  draw.text(
+      (int(w * 0.38), int(h * 0.88)),
+      "Total Width: 148mm",
+      fill=(20, 20, 20, 255),
+      font=font,
+  )
+  draw.text(
+      (int(w * 0.05), int(h * 0.45)),
+      "Lens Height: 60mm",
+      fill=(20, 20, 20, 255),
+      font=font,
+  )
+
+  return img
+
+
+def create_weight_image(product_img):
+  """生成重量圖表"""
+  img = product_img.copy().convert("RGBA")
+  w, h = img.size
+  draw = ImageDraw.Draw(img)
+
+  # 繪製極輕重量徽章
+  badge_box = [int(w * 0.65), int(h * 0.1), int(w * 0.92), int(h * 0.35)]
+  draw.ellipse(badge_box, fill=(255, 215, 0, 230), outline=(255, 255, 255), width=3)
+
+  try:
+    font_large = ImageFont.truetype("arial.ttf", int(h * 0.06))
+    font_small = ImageFont.truetype("arial.ttf", int(h * 0.03))
+  except IOError:
+    font_large = font_small = ImageFont.load_default()
+
+  draw.text(
+      (int(w * 0.72), int(h * 0.16)),
+      "28g",
+      fill=(0, 0, 0, 255),
+      font=font_large,
+  )
+  draw.text(
+      (int(w * 0.69), int(h * 0.25)),
+      "Ultra Light",
+      fill=(0, 0, 0, 255),
+      font=font_small,
+  )
+
+  return img
+
+
+# --- 3. 批量生成邏輯 ---
+st.subheader("3. 🚀 一鍵批量生成 6 大電商套圖")
+
+if st.button("✨ 開始生成所有眼鏡的全套商業圖", type="primary"):
+  if not uploaded_files:
+    st.error("⚠️ 請先上傳至少一張眼鏡實拍照！")
   elif not hf_token:
     st.warning("⚠️ 請在左側欄填入 Hugging Face Free Token！")
   else:
-    try:
-      # Step 1: AI 背景生成
-      with st.spinner("🤖 [1/3] 正在繪製高階展台背景..."):
-        client = InferenceClient(
-            model="black-forest-labs/FLUX.1-schnell", token=hf_token.strip()
+    client = InferenceClient(
+        model="black-forest-labs/FLUX.1-schnell", token=hf_token.strip()
+    )
+
+    all_zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(
+        all_zip_buffer, "a", zipfile.ZIP_DEFLATED, False
+    ) as zip_file:
+
+      for file_idx, file in enumerate(uploaded_files):
+        st.markdown(
+            f"### 👓 正在處理第 {file_idx+1} 款眼鏡：`{file.name}`"
         )
-        bg_image = client.text_to_image(backdrop_prompt).convert("RGBA")
+        orig_img = Image.open(file)
 
-      # Step 2: 實拍照自動去背
-      with st.spinner("✂️ [2/3] 正在進行眼鏡實拍照 AI 精準去背..."):
-        nobg_product = remove(img_uploaded).convert("RGBA")
+        # 自動去背
+        if REMBG_AVAILABLE:
+          nobg_img = remove(orig_img).convert("RGBA")
+        else:
+          nobg_img = orig_img.convert("RGBA")
 
-      # Step 3: 自動尺寸對齊與融合圖層合成
-      with st.spinner("🎯 [3/3] 正在調整比例、添加接觸陰影與圖層合成..."):
-        bg_w, bg_h = bg_image.size
+        # 開闢 6 個展示欄位
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m4, col_m5, col_m6 = st.columns(3)
 
-        # 縮放眼鏡尺寸（使其約佔背景寬度的 48%）
-        target_w = int(bg_w * 0.48)
-        aspect_ratio = nobg_product.height / nobg_product.width
-        target_h = int(target_w * aspect_ratio)
-        resized_product = nobg_product.resize(
-            (target_w, target_h), Image.Resampling.LANCZOS
-        )
+        # 1. 首圖 (含 Logo + 合成背景)
+        with col_m1:
+          st.caption("1️⃣ 品牌展台首圖 (含 Logo)")
+          bg_prompt = (
+              "Commercial product display backdrop with a sleek podium in"
+              " center, dark volcanic rock texture, studio rim light, 8k"
+          )
+          bg_img = client.text_to_image(bg_prompt).convert("RGBA")
 
-        # 計算放置於展台中央的座標
-        pos_x = (bg_w - target_w) // 2
-        pos_y = int(bg_h * 0.45)  # 垂直置於展台對應區域
+          # 縮放與貼合
+          bg_w, bg_h = bg_img.size
+          tw = int(bg_w * 0.5)
+          th = int(tw * (nobg_img.height / nobg_img.width))
+          resized_nobg = nobg_img.resize((tw, th), Image.Resampling.LANCZOS)
 
-        # 製作擬真陰影圖層 (接地陰影)
-        shadow_layer = Image.new("RGBA", (bg_w, bg_h), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(shadow_layer)
-        shadow_box = [
-            pos_x + int(target_w * 0.1),
-            pos_y + target_h - int(target_h * 0.15),
-            pos_x + int(target_w * 0.9),
-            pos_y + target_h + int(target_h * 0.1),
-        ]
-        draw.ellipse(shadow_box, fill=(0, 0, 0, 140))
-        shadow_layer = shadow_layer.filter(
-            ImageFilter.GaussianBlur(radius=int(target_w * 0.05))
-        )
+          comp_head = bg_img.copy()
+          comp_head.paste(
+              resized_nobg,
+              ((bg_w - tw) // 2, int(bg_h * 0.45)),
+              mask=resized_nobg,
+          )
+          final_head = add_watermark_logo(comp_head, text=brand_logo_text)
+          st.image(final_head, use_container_width=True)
 
-        # 合成：背景 ➔ 陰影 ➔ 真實眼鏡
-        final_composite = Image.alpha_composite(bg_image, shadow_layer)
-        final_composite.paste(
-            resized_product, (pos_x, pos_y), mask=resized_product
-        )
+        # 2. 鼻墊特寫圖
+        with col_m2:
+          st.caption("2️⃣ 鼻墊結構特寫圖")
+          nose_prompt = (
+              "Macro close-up photography of comfortable silicone nose pads of"
+              " athletic sunglasses, sharp details, studio lighting"
+          )
+          nose_img = client.text_to_image(nose_prompt)
+          st.image(nose_img, use_container_width=True)
 
-      st.success("🎉 廣告大片已自動合成完成！100% 保留實拍照細節！")
-      st.image(
-          final_composite,
-          caption="🏆 合成完稿大片（真實商品 + AI 展台背景）",
-          use_container_width=True,
-      )
+        # 3. 鏡腳特寫圖
+        with col_m3:
+          st.caption("3️⃣ 鏡腳雙色質感特寫圖")
+          temple_prompt = (
+              "Extreme macro close-up of dual-color black and neon yellow"
+              " sunglass temples, anti-slip texture, high-tech engineering"
+              " details"
+          )
+          temple_img = client.text_to_image(temple_prompt)
+          st.image(temple_img, use_container_width=True)
 
-      # 下載圖檔轉換
-      buf = io.BytesIO()
-      final_composite.convert("RGB").save(buf, format="JPEG", quality=95)
-      byte_im = buf.getvalue()
+        # 4. 尺寸標示圖表
+        with col_m4:
+          st.caption("4️⃣ 眼鏡尺寸標示圖")
+          dim_img = create_dimension_image(orig_img)
+          st.image(dim_img, use_container_width=True)
 
-      st.download_button(
-          label="📥 下載完成版廣告大片 (HD)",
-          data=byte_im,
-          file_name="final_eyewear_ad.jpg",
-          mime="image/jpeg",
-      )
+        # 5. 極輕重量圖表
+        with col_m5:
+          st.caption("5️⃣ 極輕重量規格圖")
+          weight_img = create_weight_image(orig_img)
+          st.image(weight_img, use_container_width=True)
 
-    except Exception as e:
-      st.error(f"❌ 處理過程發生錯誤：{str(e)}")
+        # 6. 模特兒配戴情境圖
+        with col_m6:
+          st.caption("6️⃣ 戶外運動情境配戴圖")
+          model_prompt = (
+              "Professional cyclist wearing neon yellow wraparound sports"
+              " sunglasses riding on scenic mountain road, bright sunny day,"
+              " action camera shot, realistic"
+          )
+          model_img = client.text_to_image(model_prompt)
+          st.image(model_img, use_container_width=True)
+
+        # 打包至 Zip 壓縮檔
+        prefix = f"Glasses_{file_idx+1}"
+
+        for img_obj, name in [
+            (final_head, "01_Main_Logo.png"),
+            (nose_img, "02_Nose_Pads.png"),
+            (temple_img, "03_Temples.png"),
+            (dim_img, "04_Dimensions.png"),
+            (weight_img, "05_Weight.png"),
+            (model_img, "06_Model_Lifestyle.png"),
+        ]:
+          buf = io.BytesIO()
+          img_obj.convert("RGB").save(buf, format="PNG")
+          zip_file.writestr(f"{prefix}/{name}", buf.getvalue())
+
+        st.divider()
+
+    st.success("🎉 所有圖片已生成完畢！")
+
+    # 提供全套 Zip 打包下載按鈕
+    st.download_button(
+        label="📦 一鍵下載所有眼鏡的【全套電商圖包 (ZIP)】",
+        data=all_zip_buffer.getvalue(),
+        file_name="eyewear_full_ecommerce_pack.zip",
+        mime="application/zip",
+    )
