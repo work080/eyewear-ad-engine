@@ -1,24 +1,8 @@
 import io
 import zipfile
 from huggingface_hub import InferenceClient
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
+from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
-
-# 容錯載入 HEIC 支援 (避免雲端套件安裝失敗導致系統崩潰)
-try:
-  import pyheif_pillow_opener
-
-  pyheif_pillow_opener.register_heif_opener()
-except Exception:
-  pass
-
-# 容錯載入 rembg
-try:
-  from rembg import remove
-
-  REMBG_AVAILABLE = True
-except Exception:
-  REMBG_AVAILABLE = False
 
 # 頁面基本設定
 st.set_page_config(
@@ -27,7 +11,7 @@ st.set_page_config(
 
 st.title("👓 眼鏡電商 ➔ 廣告視覺與賣點大片生成器")
 st.caption(
-    "📷 支援多圖上傳 ➔ 🎨 自動生成「光束、氣流、羽毛飄浮、水花」等 7 大賣點視覺大片"
+    "📷 支援 JPG / PNG ➔ 🎨 自動生成「光束、氣流、羽毛飄浮、水花」等 7 大賣點視覺大片"
 )
 
 st.divider()
@@ -48,10 +32,10 @@ with st.sidebar:
   temple_len = st.text_input("鏡腳長度", value="125mm")
 
 # --- 1. 多圖上傳區 ---
-st.subheader("1. 📸 批量上傳商品實拍照（支援 JPG / PNG / HEIC）")
+st.subheader("1. 📸 批量上傳商品實拍照（建議使用 JPG / PNG）")
 uploaded_files = st.file_uploader(
     "請選擇眼鏡實拍照：",
-    type=["jpg", "jpeg", "png", "heic", "HEIC"],
+    type=["jpg", "jpeg", "png"],
     accept_multiple_files=True,
 )
 
@@ -64,7 +48,7 @@ if uploaded_files:
         img = Image.open(file)
         st.image(img, caption=f"商品 {idx+1}", use_container_width=True)
       except Exception:
-        st.warning(f"商品 {idx+1} 格式需轉換")
+        st.warning(f"商品 {idx+1} 格式錯誤")
 
 st.divider()
 
@@ -103,7 +87,6 @@ def create_dimension_overlay(product_img, width_str, height_str, temple_str):
   draw = ImageDraw.Draw(img)
 
   color = (255, 70, 70, 255)
-  # 繪製長度標籤指示線
   draw.line(
       [(int(w * 0.1), int(h * 0.85)), (int(w * 0.9), int(h * 0.85))],
       fill=color,
@@ -161,16 +144,10 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
       for file_idx, file in enumerate(uploaded_files):
         st.markdown(f"### 👓 處理眼鏡素材：`{file.name}`")
         try:
-          orig_img = Image.open(file)
+          orig_img = Image.open(file).convert("RGBA")
         except Exception:
-          st.error(f"❌ 檔案 {file.name} 格式解析失敗，請先轉換為 JPG/PNG 後上傳。")
+          st.error(f"❌ 檔案 {file.name} 格式解析失敗，請確認為 JPG 或 PNG。")
           continue
-
-        # 自動去背
-        if REMBG_AVAILABLE:
-          nobg_img = remove(orig_img).convert("RGBA")
-        else:
-          nobg_img = orig_img.convert("RGBA")
 
         # 網頁排版 (4 + 3 格)
         c1, c2, c3, c4 = st.columns(4)
@@ -188,8 +165,8 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
 
           bg_w, bg_h = bg1.size
           tw = int(bg_w * 0.52)
-          th = int(tw * (nobg_img.height / nobg_img.width))
-          resized = nobg_img.resize((tw, th), Image.Resampling.LANCZOS)
+          th = int(tw * (orig_img.height / orig_img.width))
+          resized = orig_img.resize((tw, th), Image.Resampling.LANCZOS)
 
           bg1.paste(resized, ((bg_w - tw) // 2, int(bg_h * 0.42)), mask=resized)
           img_main = add_watermark_logo(bg1, text=brand_logo_text)
