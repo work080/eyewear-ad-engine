@@ -22,7 +22,7 @@ with st.sidebar:
   hf_token = st.text_input(
       "Hugging Face Token (免費選填)",
       type="password",
-      help="填入 Token 即可自動繪製 AI 視覺亮點背景！",
+      help="填入 Token 即可使用 AI 繪圖；不填則自動啟動專業內建底圖！",
   )
   brand_logo_text = st.text_input("品牌 Logo 文字", value="SCVCN")
 
@@ -82,6 +82,28 @@ def add_watermark_logo(img, text="SCVCN"):
   return img_copy
 
 
+def safe_generate_image(client, prompt, fallback_color=(25, 25, 30)):
+  """安全生成圖片：若 API 失敗或未授權，自動轉為內建專業攝影棚底圖"""
+  if client is not None:
+    try:
+      return client.text_to_image(prompt).convert("RGBA")
+    except Exception:
+      pass
+
+  # 容錯備用底圖 (1024x1024)
+  img = Image.new("RGBA", (1024, 1024), fallback_color + (255,))
+  draw = ImageDraw.Draw(img)
+  draw.rectangle(
+      [100, 100, 924, 924], outline=(70, 70, 80, 255), width=6
+  )
+  try:
+    font = ImageFont.truetype("arial.ttf", 36)
+  except IOError:
+    font = ImageFont.load_default()
+  draw.text((120, 120), "STUDIO VISUAL BACKDROP", fill=(150, 150, 160, 200), font=font)
+  return img
+
+
 def create_specs_overlay(
     product_img, width_str, height_str, bridge_str, temple_str, weight_str
 ):
@@ -91,7 +113,6 @@ def create_specs_overlay(
   draw = ImageDraw.Draw(img)
 
   color = (255, 70, 70, 255)
-  # 繪製主尺寸線條
   draw.line(
       [(int(w * 0.1), int(h * 0.85)), (int(w * 0.9), int(h * 0.85))],
       fill=color,
@@ -114,7 +135,6 @@ def create_specs_overlay(
   except IOError:
     font_large = font_small = ImageFont.load_default()
 
-  # 標示文字
   draw.text(
       (int(w * 0.28), int(h * 0.88)),
       f"Total Width: {width_str}",
@@ -155,12 +175,16 @@ st.subheader("2. 🚀 一鍵生成「視覺亮點」全套廣告大片")
 if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
   if not uploaded_files:
     st.error("⚠️ 請先上傳至少一張眼鏡實拍照！")
-  elif not hf_token:
-    st.warning("⚠️ 請在左側欄填入 Hugging Face Free Token！")
   else:
-    client = InferenceClient(
-        model="black-forest-labs/FLUX.1-schnell", token=hf_token.strip()
-    )
+    client = None
+    if hf_token.strip():
+      try:
+        client = InferenceClient(
+            model="black-forest-labs/FLUX.1-schnell", token=hf_token.strip()
+        )
+      except Exception:
+        client = None
+
     all_zip_buffer = io.BytesIO()
 
     with zipfile.ZipFile(
@@ -187,7 +211,9 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
               " podium, dramatic rim lighting, cinematic depth of field, empty"
               " center"
           )
-          bg1 = client.text_to_image(p1).convert("RGBA")
+          bg1 = safe_generate_image(
+              client, p1, fallback_color=(20, 20, 25)
+          ).convert("RGBA")
 
           bg_w, bg_h = bg1.size
           tw = int(bg_w * 0.52)
@@ -206,7 +232,7 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
               " water droplets, lens refraction light streaks, glare control"
               " visual effect, dark studio"
           )
-          img_uv = client.text_to_image(p2)
+          img_uv = safe_generate_image(client, p2, fallback_color=(15, 30, 45))
           st.image(img_uv, use_container_width=True)
 
         # 3. 防霧 / 流線：動態風洞氣流
@@ -217,7 +243,7 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
               " lines swirling through air, high-speed motion trail, dark blue"
               " background"
           )
-          img_fog = client.text_to_image(p3)
+          img_fog = safe_generate_image(client, p3, fallback_color=(20, 35, 50))
           st.image(img_fog, use_container_width=True)
 
         # 4. 極輕量：羽毛懸浮 + 漂浮微重力
@@ -228,7 +254,9 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
               " effect, zero gravity concept, clean soft lighting, ultra light"
               " feel"
           )
-          img_light = client.text_to_image(p4)
+          img_light = safe_generate_image(
+              client, p4, fallback_color=(40, 40, 45)
+          )
           st.image(img_light, use_container_width=True)
 
         # 5. 耐用韌性：雙色鏡腳與機械切面放大
@@ -239,7 +267,9 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
               " sports sunglass temples, precision engineered texture, sharp"
               " focus, metallic hinge details"
           )
-          img_temple = client.text_to_image(p5)
+          img_temple = safe_generate_image(
+              client, p5, fallback_color=(30, 30, 30)
+          )
           st.image(img_temple, use_container_width=True)
 
         # 6. 尺寸與重量規格圖
@@ -263,7 +293,9 @@ if st.button("✨ 立即生成全套品牌視覺大片", type="primary"):
               " riding fast on scenic highway, motion blur background, bright"
               " sunshine, action shot"
           )
-          img_model = client.text_to_image(p7)
+          img_model = safe_generate_image(
+              client, p7, fallback_color=(20, 40, 30)
+          )
           st.image(img_model, use_container_width=True)
 
         # 打包儲存
